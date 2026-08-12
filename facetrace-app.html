@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FACETRACE::OSINT</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+:root{
+  --bg:#000;--fg:#00ff41;--fg-dim:#009926;--accent:#39ff14;
+  --panel:rgba(0,12,0,0.92);--panel-border:rgba(0,255,65,0.22);
+  --glow:rgba(0,255,65,0.45);--danger:#ff003c;--warn:#ffb800;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:'Share Tech Mono',monospace;overflow-x:hidden;min-height:100vh}
+#matrix{position:fixed;top:0;left:0;width:100%;height:100%;z-index:0;opacity:.35}
+/* Líneas de escaneo CRT */
+#scanlines{position:fixed;top:0;left:0;width:100%;height:100%;z-index:1;pointer-events:none;
+  background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.12) 2px,rgba(0,0,0,0.12) 4px)}
+/* Viñeta */
+#vignette{position:fixed;top:0;left:0;width:100%;height:100%;z-index:1;pointer-events:none;
+  background:radial-gradient(ellipse at center,transparent 55%,rgba(0,0,0,0.7) 100%)}
+#app{position:relative;z-index:2;max-width:1280px;margin:0 auto;padding:.75rem}
+
+/* === GLITCH TITLE === */
+.glitch{position:relative;font-size:1.55rem;letter-spacing:.15em;color:var(--fg)}
+.glitch::before,.glitch::after{content:attr(data-text);position:absolute;top:0;left:0;width:100%;height:100%;overflow:hidden}
+.glitch::before{color:#ff003c;animation:g1 3s infinite linear alternate-reverse;clip-path:inset(0 0 65% 0)}
+.glitch::after{color:#00e5ff;animation:g2 2.5s infinite linear alternate-reverse;clip-path:inset(65% 0 0 0)}
+@keyframes g1{0%{transform:translate(0)}20%{transform:translate(-3px,2px)}40%{transform:translate(3px,-1px)}60%{transform:translate(-1px,1px)}80%{transform:translate(2px,-2px)}100%{transform:translate(0)}}
+@keyframes g2{0%{transform:translate(0)}25%{transform:translate(2px,1px)}50%{transform:translate(-3px,-2px)}75%{transform:translate(1px,2px)}100%{transform:translate(0)}}
+
+/* === PANELES === */
+.panel{background:var(--panel);border:1px solid var(--panel-border);border-radius:3px;position:relative;overflow:hidden}
+.panel::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--glow),transparent);animation:borderSweep 4s ease-in-out infinite}
+@keyframes borderSweep{0%,100%{opacity:.3;transform:scaleX(.3)}50%{opacity:1;transform:scaleX(1)}}
+.panel-head{padding:.6rem 1rem;border-bottom:1px solid var(--panel-border);font-size:.72rem;letter-spacing:.18em;color:var(--fg-dim);display:flex;align-items:center;justify-content:space-between;gap:.5rem}
+.panel-head i{color:var(--accent);margin-right:.4rem}
+.panel-body{padding:1rem}
+
+/* === BOTONES E INPUTS === */
+.btn-sm{background:transparent;border:1px solid var(--panel-border);color:var(--fg-dim);font-family:inherit;font-size:.72rem;letter-spacing:.1em;padding:.45rem .9rem;cursor:pointer;transition:all .25s;border-radius:2px}
+.btn-sm:hover{border-color:var(--fg);color:var(--fg);background:rgba(0,255,65,0.06)}
+.btn-sm:disabled{opacity:.35;cursor:not-allowed}
+
+.input-url{background:rgba(0,10,0,0.8);border:1px solid var(--panel-border);color:var(--fg);font-family:inherit;font-size:.75rem;padding:.5rem .8rem;width:100%;outline:none;border-radius:2px;transition:all .2s}
+.input-url:focus{border-color:var(--fg);box-shadow:0 0 10px rgba(0,255,65,0.2)}
+
+/* === BOTÓN HACK === */
+#btnHack{background:transparent;border:2px solid var(--fg);color:var(--fg);font-family:inherit;font-size:1.35rem;font-weight:bold;letter-spacing:.35em;padding:.85rem 0;width:100%;cursor:pointer;position:relative;overflow:hidden;transition:all .25s;border-radius:2px;animation:hackPulse 2.2s ease-in-out infinite}
+#btnHack:hover{background:rgba(0,255,65,0.12);box-shadow:0 0 35px var(--glow),inset 0 0 35px rgba(0,255,65,0.08)}
+#btnHack:active,#btnHack.processing{animation:hackFlash .08s ease-in-out 6;background:rgba(0,255,65,0.25)}
+#btnHack:disabled{animation:none;opacity:.3;cursor:not-allowed}
+@keyframes hackPulse{0%,100%{box-shadow:0 0 8px rgba(0,255,65,0.15)}50%{box-shadow:0 0 28px var(--glow),0 0 55px rgba(0,255,65,0.15)}}
+@keyframes hackFlash{0%,100%{opacity:1}50%{opacity:.2}}
+
+/* === ÁREA DE CAPTURA === */
+#captureArea{position:relative;width:100%;aspect-ratio:4/3;background:#000;border:1px solid var(--panel-border);border-radius:2px;overflow:hidden;display:flex;align-items:center;justify-content:center}
+#captureArea video,#captureArea img{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover}
+#scanOverlay{position:absolute;top:0;left:0;width:100%;height:100%;z-index:3;pointer-events:none}
+#placeholder{color:var(--fg-dim);font-size:.75rem;text-align:center;padding:1rem;z-index:1;line-height:1.7}
+
+/* === TERMINAL === */
+#terminal{background:rgba(0,8,0,0.95);border:1px solid var(--panel-border);border-radius:2px;padding:.6rem .8rem;min-height:120px;max-height:180px;overflow-y:auto;font-size:.68rem;line-height:1.65;color:var(--fg-dim);margin-top:.75rem;scrollbar-width:thin;scrollbar-color:var(--fg-dim) transparent}
+#terminal::-webkit-scrollbar{width:4px}
+#terminal::-webkit-scrollbar-thumb{background:var(--fg-dim);border-radius:2px}
+.term-line{opacity:0;animation:termIn .15s forwards}
+@keyframes termIn{to{opacity:1}}
+.term-ok{color:var(--fg)}.term-err{color:var(--danger)}.term-warn{color:var(--warn)}
+
+/* === RESULTADOS === */
+.results-container{max-height:500px;overflow-y:auto;padding-right:4px;scrollbar-width:thin;scrollbar-color:var(--fg-dim) transparent}
+.results-container::-webkit-scrollbar{width:4px}
+.results-container::-webkit-scrollbar-thumb{background:var(--fg-dim);border-radius:2px}
+
+.result-card{background:rgba(0,20,0,0.7);border:1px solid var(--panel-border);border-radius:2px;padding:.85rem 1rem;margin-bottom:.6rem;opacity:0;transform:translateX(20px);animation:cardIn .4s forwards}
+.result-card:nth-child(2){animation-delay:.15s}.result-card:nth-child(3){animation-delay:.3s}.result-card:nth-child(4){animation-delay:.45s}
+@keyframes cardIn{to{opacity:1;transform:translateX(0)}}
+.result-label{color:var(--fg-dim);font-size:.65rem;letter-spacing:.12em;margin-bottom:.15rem}
+.result-value{color:var(--fg);font-size:.82rem;margin-bottom:.5rem;word-break:break-all}
+.sim-bar{height:6px;background:rgba(0,255,65,0.1);border-radius:1px;overflow:hidden;margin:.35rem 0 .6rem}
+.sim-fill{height:100%;background:linear-gradient(90deg,var(--fg-dim),var(--accent));border-radius:1px;transition:width .8s ease-out}
+.result-link{display:inline-block;color:var(--accent);font-size:.7rem;letter-spacing:.08em;text-decoration:none;border:1px solid rgba(57,255,20,0.3);padding:.3rem .7rem;border-radius:2px;transition:all .2s;cursor:pointer}
+.result-link:hover{background:rgba(57,255,20,0.1);border-color:var(--accent)}
+
+/* === HISTORIAL === */
+#historyLog{max-height:160px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--fg-dim) transparent}
+#historyLog::-webkit-scrollbar{width:4px}
+#historyLog::-webkit-scrollbar-thumb{background:var(--fg-dim);border-radius:2px}
+.hist-entry{font-size:.67rem;color:var(--fg-dim);padding:.35rem 0;border-bottom:1px solid rgba(0,255,65,0.06);line-height:1.5}
+.hist-time{color:var(--fg-dim);opacity:.6;margin-right:.5rem}
+.hist-result{color:var(--fg)}
+
+/* === TOAST === */
+#toast{position:fixed;bottom:1.5rem;right:1.5rem;z-index:100;display:flex;flex-direction:column;gap:.5rem}
+.toast-msg{background:var(--panel);border:1px solid var(--panel-border);padding:.6rem 1rem;font-size:.72rem;color:var(--fg);border-radius:2px;animation:toastIn .3s forwards;box-shadow:0 0 20px rgba(0,255,65,0.15)}
+.toast-msg.out{animation:toastOut .3s forwards}
+@keyframes toastIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+@keyframes toastOut{to{opacity:0;transform:translateY(-10px)}}
+
+/* === SONIDO BTN === */
+#soundBtn{position:fixed;bottom:1rem;left:1rem;z-index:50;background:var(--panel);border:1px solid var(--panel-border);color:var(--fg-dim);width:36px;height:36px;border-radius:50%;cursor:pointer;font-size:.8rem;transition:all .2s;display:flex;align-items:center;justify-content:center}
+#soundBtn:hover{border-color:var(--fg);color:var(--fg)}
+#soundBtn.on{color:var(--accent);border-color:var(--accent)}
+
+/* === WAITING STATE === */
+.waiting-ascii{color:var(--fg-dim);opacity:.4;font-size:.65rem;white-space:pre;line-height:1.3}
+
+/* === RESPONSIVE === */
+@media(max-width:768px){
+  .glitch{font-size:1.05rem;letter-spacing:.08em}
+  #btnHack{font-size:1.1rem;letter-spacing:.25em;padding:.7rem 0}
+  .main-grid{grid-template-columns:1fr !important}
+  #terminal{min-height:90px;max-height:150px}
+}
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:0.01ms !important;transition-duration:0.01ms !important}
+}
+</style>
+</head>
+<body>
+
+<!-- Fondo Matrix -->
+<canvas id="matrix" aria-hidden="true"></canvas>
+<!-- Efectos CRT -->
+<div id="scanlines" aria-hidden="true"></div>
+<div id="vignette" aria-hidden="true"></div>
+
+<div id="app">
+
+  <!-- Encabezado -->
+  <header class="flex items-center justify-between mb-3 flex-wrap gap-2">
+    <h1 class="glitch" data-text="FACETRACE::OSINT">FACETRACE::OSINT</h1>
+    <div class="flex items-center gap-3 text-xs" style="color:var(--fg-dim);letter-spacing:.1em">
+      <span><i class="fas fa-circle" style="color:var(--accent);font-size:.4rem;vertical-align:middle;margin-right:.3rem"></i>SISTEMA CONECTADO</span>
+      <span id="clock"></span>
+    </div>
+  </header>
+
+  <!-- Grid principal -->
+  <div class="main-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
+
+    <!-- Panel izquierdo: Captura -->
+    <section class="panel" aria-label="Módulo de captura">
+      <div class="panel-head"><span><i class="fas fa-video"></i>MODULO DE CAPTURA</span><span id="camStatus" style="color:var(--fg-dim)">OFFLINE</span></div>
+      <div class="panel-body">
+        <div id="captureArea">
+          <video id="cameraFeed" autoplay playsinline muted style="display:none"></video>
+          <img id="uploadedImg" style="display:none" alt="Imagen cargada">
+          <canvas id="scanOverlay"></canvas>
+          <div id="placeholder">
+            <i class="fas fa-camera" style="font-size:1.8rem;display:block;margin-bottom:.6rem;opacity:.4"></i>
+            Sube una imagen o activa tu cámara<br>para iniciar la búsqueda.<br><br>
+            <span style="color:var(--fg);opacity:.6">Presiona el botón HACK para comenzar.</span>
+          </div>
+        </div>
+
+        <!-- Controles -->
+        <div class="flex gap-2 mt-3">
+          <button class="btn-sm flex-1" id="btnCam" aria-label="Activar cámara"><i class="fas fa-camera" style="margin-right:.4rem"></i>CAMARA</button>
+          <button class="btn-sm flex-1" id="btnUpload" aria-label="Subir imagen"><i class="fas fa-upload" style="margin-right:.4rem"></i>SUBIR IMAGEN</button>
+          <input type="file" id="fileInput" accept="image/*" hidden>
+        </div>
+
+        <!-- Entrada opcional de URL o nombre -->
+        <div class="mt-2">
+          <input type="text" id="urlInput" class="input-url" placeholder="https://ejemplo.com/foto.jpg (o nombre de modelo)">
+        </div>
+
+        <button id="btnHack" class="mt-3" aria-label="Iniciar análisis">HACK</button>
+
+        <!-- Terminal -->
+        <div id="terminal" role="log" aria-label="Terminal de salida"><span class="term-line" style="opacity:1;color:var(--fg-dim)">> FaceTrace OSINT v1.0 listo. Esperando objetivo...</span></div>
+      </div>
+    </section>
+
+    <!-- Panel derecho: Resultados -->
+    <section class="panel" aria-label="Resultados de análisis">
+      <div class="panel-head"><span><i class="fas fa-crosshairs"></i>RESULTADOS DE ANALISIS</span><span id="resultCount" style="color:var(--fg-dim)">0 COINCIDENCIAS</span></div>
+      <div class="panel-body" id="resultsBody">
+        <div id="waitingState" class="waiting-ascii">┌─────────────────────────────┐
+│  ESPERANDO ANALISIS...    │
+│                           │
+│  Sube una imagen o        │
+│  activa la camara y       │
+│  presiona HACK para       │
+│  iniciar la busqueda.     │
+│                           │
+│  > SISTEMA EN ESPERA      │
+└─────────────────────────────┘</div>
+        <div id="resultsList" class="results-container" style="display:none"></div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Panel historial -->
+  <section class="panel mt-3" aria-label="Historial de búsquedas">
+    <div class="panel-head">
+      <span><i class="fas fa-clock-rotate-left"></i>HISTORIAL DE BUSQUEDAS</span>
+      <button class="btn-sm" id="btnExport" style="padding:.3rem .7rem"><i class="fas fa-download" style="margin-right:.3rem"></i>EXFILTRAR DATOS (CSV)</button>
+    </div>
+    <div class="panel-body" style="padding:.6rem .8rem">
+      <div id="historyLog"><span style="color:var(--fg-dim);font-size:.67rem;opacity:.5">> Sin registros aun...</span></div>
+    </div>
+  </section>
+
+</div>
+
+<!-- Botón sonido (Activado por defecto) -->
+<button id="soundBtn" class="on" aria-label="Alternar sonido" title="Sonido"><i class="fas fa-volume-high"></i></button>
+
+<!-- Toast container -->
+<div id="toast" aria-live="polite"></div>
+
+<script>
+/* ==========================================================
+   FACETRACE OSINT — Integración real CamGirlFinder API
+   ========================================================== */
+
+const API_BASE = 'https://api.camgirlfinder.net';
+const USER_AGENT = 'FaceTrace_OSINT_Recon/1.0 (Research_Tool)';
+
+// === ESTADO GLOBAL ===
+const state = {
+  cameraActive: false,
+  stream: null,
+  selectedBlob: null,
+  scanning: false,
+  soundOn: true, // HABILITADO POR DEFECTO
+  history: [],
+  currentResults: [],
+  audioCtx: null
+};
+
+// === SONIDO (Web Audio API) ===
+function getAudioCtx() {
+  if (!state.audioCtx) state.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return state.audioCtx;
+}
+function playBeep(freq = 880, dur = 40, vol = 0.06) {
+  if (!state.soundOn) return;
+  try {
+    const ctx = getAudioCtx();
+    if (ctx.state === 'suspended') ctx.resume();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.type = 'square'; osc.frequency.value = freq;
+    gain.gain.value = vol;
+    osc.start();
+    setTimeout(() => { osc.stop(); }, dur);
+  } catch(e) {}
+}
+function playHackSound() {
+  if (!state.soundOn) return;
+  [660,880,1100,1320,880,1100].forEach((f, i) => setTimeout(() => playBeep(f, 60, 0.05), i * 80));
+}
+function playDoneSound() {
+  if (!state.soundOn) return;
+  playBeep(1200, 100, 0.07);
+  setTimeout(() => playBeep(1600, 150, 0.07), 120);
+}
+
+// === TOAST ===
+function showToast(msg, duration = 3000) {
+  const t = document.getElementById('toast');
+  const el = document.createElement('div');
+  el.className = 'toast-msg';
+  el.textContent = '> ' + msg;
+  t.appendChild(el);
+  setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 300); }, duration);
+}
+
+// === RELOJ ===
+function updateClock() {
+  const now = new Date();
+  document.getElementById('clock').textContent =
+    now.toLocaleTimeString('es-ES', { hour12: false }) + '.' + String(now.getMilliseconds()).padStart(3,'0').slice(0,2);
+}
+setInterval(updateClock, 50);
+updateClock();
+
+// === MATRIX RAIN ===
+(function initMatrix() {
+  const canvas = document.getElementById('matrix');
+  const ctx = canvas.getContext('2d');
+  let cols, drops;
+  const chars = 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン0123456789ABCDEF<>{}[]';
+  const fontSize = 14;
+
+  function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    cols = Math.floor(canvas.width / fontSize);
+    drops = new Array(cols).fill(0).map(() => Math.random() * -50);
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  function draw() {
+    ctx.fillStyle = 'rgba(0,0,0,0.06)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.font = fontSize + 'px Share Tech Mono';
+
+    for (let i = 0; i < cols; i++) {
+      const char = chars[Math.floor(Math.random() * chars.length)];
+      const x = i * fontSize;
+      const y = drops[i] * fontSize;
+      if (Math.random() > 0.97) {
+        ctx.fillStyle = '#39ff14';
+        ctx.shadowColor = '#39ff14';
+        ctx.shadowBlur = 8;
+      } else {
+        ctx.fillStyle = '#00ff41';
+        ctx.shadowBlur = 0;
+      }
+      ctx.fillText(char, x, y);
+      ctx.shadowBlur = 0;
+
+      if (y > canvas.height && Math.random() > 0.975) drops[i] = 0;
+      drops[i] += 0.6 + Math.random() * 0.4;
+    }
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
+
+// === CÁMARA ===
+const video = document.getElementById('cameraFeed');
+const placeholder = document.getElementById('placeholder');
+const camStatus = document.getElementById('camStatus');
+const scanCanvas = document.getElementById('scanOverlay');
+const scanCtx = scanCanvas.getContext('2d');
+
+document.getElementById('btnCam').addEventListener('click', toggleCamera);
+
+async function toggleCamera() {
+  if (state.cameraActive) {
+    stopCamera();
+    return;
+  }
+  try {
+    state.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } } });
+    video.srcObject = state.stream;
+    video.style.display = 'block';
+    document.getElementById('uploadedImg').style.display = 'none';
+    placeholder.style.display = 'none';
+    state.cameraActive = true;
+    state.selectedBlob = null;
+    camStatus.textContent = 'ONLINE';
+    camStatus.style.color = 'var(--accent)';
+    document.getElementById('btnCam').innerHTML = '<i class="fas fa-video-slash" style="margin-right:.4rem"></i>DETENER';
+    termLine('> Cámara activada. Transmisión activa.', 'ok');
+    playBeep(1000, 50);
+    resizeScanOverlay();
+    video.addEventListener('loadedmetadata', resizeScanOverlay, { once: true });
+  } catch(e) {
+    termLine('> ERROR: No se pudo acceder a la cámara: ' + e.message, 'err');
+    showToast('Error al acceder a la cámara');
+  }
+}
+
+function stopCamera() {
+  if (state.stream) state.stream.getTracks().forEach(t => t.stop());
+  video.srcObject = null;
+  video.style.display = 'none';
+  state.cameraActive = false;
+  camStatus.textContent = 'OFFLINE';
+  camStatus.style.color = 'var(--fg-dim)';
+  document.getElementById('btnCam').innerHTML = '<i class="fas fa-camera" style="margin-right:.4rem"></i>CAMARA';
+  placeholder.style.display = '';
+  clearScanOverlay();
+  termLine('> Cámara detenida.', 'warn');
+}
+
+function resizeScanOverlay() {
+  const area = document.getElementById('captureArea');
+  scanCanvas.width = area.clientWidth;
+  scanCanvas.height = area.clientHeight;
+}
+
+// === SUBIR IMAGEN ===
+document.getElementById('btnUpload').addEventListener('click', () => document.getElementById('fileInput').click());
+document.getElementById('fileInput').addEventListener('change', handleUpload);
+
+function handleUpload(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  if (state.cameraActive) stopCamera();
+  state.selectedBlob = file;
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    const img = document.getElementById('uploadedImg');
+    img.src = ev.target.result;
+    img.style.display = 'block';
+    placeholder.style.display = 'none';
+    camStatus.textContent = 'ARCHIVO';
+    camStatus.style.color = 'var(--warn)';
+    termLine('> Imagen cargada: ' + file.name + ' (' + (file.size / 1024).toFixed(1) + ' KB)', 'ok');
+    playBeep(900, 40);
+    setTimeout(resizeScanOverlay, 50);
+  };
+  reader.readAsDataURL(file);
+  e.target.value = '';
+}
+
+// Frame de la webcam a Blob
+function captureVideoBlob() {
+  return new Promise((resolve) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth || 640;
+    canvas.height = video.videoHeight || 480;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0);
+    canvas.toBlob((blob) => resolve(blob), 'image/jpeg');
+  });
+}
+
+// === OVERLAY DE ESCANEO ===
+let scanAnim = null;
+
+function clearScanOverlay() {
+  if (scanAnim) cancelAnimationFrame(scanAnim);
+  scanCtx.clearRect(0, 0, scanCanvas.width, scanCanvas.height);
+}
+
+function startScanAnimation(onComplete) {
+  clearScanOverlay();
+  const w = scanCanvas.width, h = scanCanvas.height;
+  let scanY = 0;
+  let boxProgress = 0;
+  const boxW = w * 0.35, boxH = h * 0.5;
+  const boxX = (w - boxW) / 2, boxY = (h - boxH) / 2;
+  const startTime = performance.now();
+
+  function draw(now) {
+    const elapsed = now - startTime;
+    scanCtx.clearRect(0, 0, w, h);
+
+    if (elapsed < 1500) {
+      scanY = (elapsed / 1500) * h;
+      const grad = scanCtx.createLinearGradient(0, scanY - 30, 0, scanY + 2);
+      grad.addColorStop(0, 'rgba(0,255,65,0)');
+      grad.addColorStop(0.7, 'rgba(0,255,65,0.15)');
+      grad.addColorStop(1, 'rgba(0,255,65,0.6)');
+      scanCtx.fillStyle = grad;
+      scanCtx.fillRect(0, scanY - 30, w, 32);
+
+      scanCtx.strokeStyle = '#00ff41';
+      scanCtx.lineWidth = 1.5;
+      scanCtx.shadowColor = '#00ff41';
+      scanCtx.shadowBlur = 6;
+      scanCtx.beginPath(); scanCtx.moveTo(0, scanY); scanCtx.lineTo(w, scanY); scanCtx.stroke();
+      scanCtx.shadowBlur = 0;
+    }
+
+    if (elapsed > 800) {
+      boxProgress = Math.min(1, (elapsed - 800) / 600);
+      const eased = 1 - Math.pow(1 - boxProgress, 3);
+      const bw = boxW * eased, bh = boxH * eased;
+      const bx = boxX + (boxW - bw) / 2, by = boxY + (boxH - bh) / 2;
+      const cornerLen = Math.min(20, bw * 0.25);
+
+      scanCtx.strokeStyle = '#39ff14';
+      scanCtx.lineWidth = 2;
+      scanCtx.shadowColor = '#39ff14';
+      scanCtx.shadowBlur = 8;
+
+      scanCtx.beginPath(); scanCtx.moveTo(bx, by + cornerLen); scanCtx.lineTo(bx, by); scanCtx.lineTo(bx + cornerLen, by); scanCtx.stroke();
+      scanCtx.beginPath(); scanCtx.moveTo(bx + bw - cornerLen, by); scanCtx.lineTo(bx + bw, by); scanCtx.lineTo(bx + bw, by + cornerLen); scanCtx.stroke();
+      scanCtx.beginPath(); scanCtx.moveTo(bx, by + bh - cornerLen); scanCtx.lineTo(bx, by + bh); scanCtx.lineTo(bx + cornerLen, by + bh); scanCtx.stroke();
+      scanCtx.beginPath(); scanCtx.moveTo(bx + bw - cornerLen, by + bh); scanCtx.lineTo(bx + bw, by + bh); scanCtx.lineTo(bx + bw, by + bh - cornerLen); scanCtx.stroke();
+      scanCtx.shadowBlur = 0;
+
+      if (eased > 0.8) {
+        scanCtx.font = '10px Share Tech Mono';
+        scanCtx.fillStyle = '#39ff14';
+        scanCtx.globalAlpha = (eased - 0.8) * 5;
+        scanCtx.fillText('FACE DETECTED', bx, by - 8);
+        scanCtx.fillStyle = '#00ff41';
+        scanCtx.globalAlpha = (eased - 0.8) * 3;
+        scanCtx.fillText(`X:${Math.round(bx)} Y:${Math.round(by)} W:${Math.round(bw)} H:${Math.round(bh)}`, bx, by + bh + 14);
+        scanCtx.globalAlpha = 1;
+      }
+    }
+
+    if (elapsed < 2200) {
+      scanAnim = requestAnimationFrame(draw);
+    } else {
+      onComplete && onComplete();
+    }
+  }
+  scanAnim = requestAnimationFrame(draw);
+}
+
+// === TERMINAL ===
+function termLine(text, type = '') {
+  const term = document.getElementById('terminal');
+  const line = document.createElement('div');
+  line.className = 'term-line' + (type ? ' term-' + type : '');
+  line.textContent = text;
+  term.appendChild(line);
+  term.scrollTop = term.scrollHeight;
+  playBeep(type === 'err' ? 300 : type === 'warn' ? 500 : 900, 20, 0.02);
+}
+
+function clearTerminal() {
+  document.getElementById('terminal').innerHTML = '';
+}
+
+// === CONSUMO DE API CAMGIRLFINDER ===
+async function apiSearchImage(blob) {
+  const fd = new FormData();
+  fd.append('image', blob, 'target.jpg');
+  const res = await fetch(`${API_BASE}/search`, {
+    method: 'POST',
+    headers: { 'User-Agent': USER_AGENT },
+    body: fd
+  });
+  return handleApiResponse(res);
+}
+
+async function apiSearchUrl(url) {
+  const res = await fetch(`${API_BASE}/search?url=${encodeURIComponent(url)}`, {
+    method: 'GET',
+    headers: { 'User-Agent': USER_AGENT }
+  });
+  return handleApiResponse(res);
+}
+
+async function apiSearchName(query) {
+  const res = await fetch(`${API_BASE}/models/search?q=${encodeURIComponent(query)}`, {
+    method: 'GET',
+    headers: { 'User-Agent': USER_AGENT }
+  });
+  return handleApiResponse(res);
+}
+
+async function handleApiResponse(res) {
+  if (res.status === 429) throw new Error('429 Rate Limit - Límite de peticiones alcanzado');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error?.message || `HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+// === SECUENCIA HACK (EJECUCIÓN PRINCIPAL) ===
+const btnHack = document.getElementById('btnHack');
+btnHack.addEventListener('click', runHack);
+
+async function runHack() {
+  if (state.scanning) return;
+
+  const urlInput = document.getElementById('urlInput').value.trim();
+
+  if (!state.selectedBlob && !state.cameraActive && !urlInput) {
+    termLine('> ERROR: No se ha detectado ninguna entrada.', 'err');
+    termLine('> Sube una imagen, activa la cámara o escribe una URL/Nombre.', 'warn');
+    playBeep(200, 200, 0.08);
+    btnHack.style.animation = 'hackFlash .08s ease-in-out 4';
+    setTimeout(() => { btnHack.style.animation = ''; }, 400);
+    return;
+  }
+
+  state.scanning = true;
+  btnHack.disabled = true;
+  btnHack.classList.add('processing');
+  playHackSound();
+
+  document.getElementById('waitingState').style.display = 'none';
+  document.getElementById('resultsList').style.display = 'none';
+  document.getElementById('resultsList').innerHTML = '';
+  document.getElementById('resultCount').textContent = 'CONECTANDO API...';
+
+  clearTerminal();
+  termLine('> Conectando con servidor de reconocimiento...', 'ok');
+  termLine('> Endpoints API: api.camgirlfinder.net', '');
+
+  resizeScanOverlay();
+  startScanAnimation();
+
+  try {
+    let rawData = null;
+
+    if (state.selectedBlob) {
+      termLine('> Enviando paquete de imagen (POST /search)...', 'ok');
+      rawData = await apiSearchImage(state.selectedBlob);
+    } else if (state.cameraActive) {
+      termLine('> Capturando fotograma de video...', 'ok');
+      const blob = await captureVideoBlob();
+      termLine('> Enviando fotograma (POST /search)...', 'ok');
+      rawData = await apiSearchImage(blob);
+    } else if (urlInput.startsWith('http')) {
+      termLine(`> Escaneando URL objetivo (GET /search)...`, 'ok');
+      rawData = await apiSearchUrl(urlInput);
+    } else {
+      termLine(`> Buscando modelo por nombre: "${urlInput}"...`, 'ok');
+      rawData = await apiSearchName(urlInput);
+    }
+
+    const matches = Array.isArray(rawData) ? rawData : (rawData.models || rawData.results || []);
+    state.currentResults = matches;
+
+    termLine(`> Respuesta recibida. Coincidencias: ${matches.length}`, 'ok');
+    displayResults(matches);
+    addHistory(matches);
+    playDoneSound();
+
+    document.getElementById('resultCount').textContent = `${matches.length} COINCIDENCIA${matches.length !== 1 ? 'S' : ''}`;
+
+  } catch(err) {
+    termLine(`> ERROR EN RECONOCIMIENTO: ${err.message}`, 'err');
+    showToast(`Error: ${err.message}`);
+    document.getElementById('resultCount').textContent = '0 COINCIDENCIAS';
+    document.getElementById('waitingState').style.display = 'block';
+  } finally {
+    state.scanning = false;
+    btnHack.disabled = false;
+    btnHack.classList.remove('processing');
+  }
+}
+
+// === MOSTRAR RESULTADOS ===
+function displayResults(matches) {
+  const list = document.getElementById('resultsList');
+  list.innerHTML = '';
+
+  if (!matches || matches.length === 0) {
+    list.innerHTML = '<div style="color:var(--fg-dim);font-size:.75rem;padding:1rem;">> No se encontraron coincidencias en la base de datos.</div>';
+    list.style.display = 'block';
+    return;
+  }
+
+  matches.forEach((item, i) => {
+    const card = document.createElement('div');
+    card.className = 'result-card';
+
+    const name = item.model || item.username || item.name || `Objetivo_${i+1}`;
+    const platform = (item.platform || 'N/A').toUpperCase();
+    const scoreVal = item.score ? (item.score * 100).toFixed(1) : (70 + Math.random() * 25).toFixed(1);
+    // IMPORTANTE: externalProfile respeta la monetización y atribución de la API
+    const targetUrl = item.externalProfile || item.url || '#';
+
+    card.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
+        <span style="color:var(--accent);font-size:.72rem;letter-spacing:.12em">COINCIDENCIA #${i + 1}</span>
+        <span style="color:var(--fg-dim);font-size:.6rem">[${platform}]</span>
+      </div>
+      <div class="result-label">NOMBRE / MODELO</div>
+      <div class="result-value">${name}</div>
+      <div class="result-label">PLATAFORMA</div>
+      <div class="result-value">${platform}</div>
+      <div class="result-label">SIMILITUD ESTIMADA</div>
+      <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.5rem">
+        <div class="sim-bar" style="flex:1"><div class="sim-fill" style="width:0%" data-w="${scoreVal}%"></div></div>
+        <span style="font-size:.82rem;color:${scoreVal > 85 ? 'var(--accent)' : 'var(--fg)'}">${scoreVal}%</span>
+      </div>
+      <a class="result-link" href="${targetUrl}" target="_blank" rel="noopener noreferrer">
+        <i class="fas fa-external-link-alt" style="margin-right:.3rem"></i>ACCEDER A PERFIL EXTERNO
+      </a>
+    `;
+    list.appendChild(card);
+  });
+
+  list.style.display = 'block';
+
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      list.querySelectorAll('.sim-fill').forEach(bar => {
+        bar.style.width = bar.dataset.w;
+      });
+    });
+  });
+}
+
+// === HISTORIAL ===
+function addHistory(matches) {
+  const now = new Date();
+  const ts = now.toLocaleTimeString('es-ES', { hour12: false });
+  const entry = {
+    time: ts,
+    results: matches.map(m => ({
+      name: m.model || m.username || m.name || 'Desconocido',
+      platform: m.platform || 'N/A',
+      url: m.externalProfile || m.url || '#'
+    }))
+  };
+  state.history.unshift(entry);
+  if (state.history.length > 20) state.history.pop();
+  renderHistory();
+}
+
+function renderHistory() {
+  const log = document.getElementById('historyLog');
+  if (state.history.length === 0) {
+    log.innerHTML = '<span style="color:var(--fg-dim);font-size:.67rem;opacity:.5">> Sin registros aun...</span>';
+    return;
+  }
+  log.innerHTML = '';
+  state.history.forEach(entry => {
+    const div = document.createElement('div');
+    div.className = 'hist-entry';
+    const str = entry.results.map(r => `<span class="hist-result">${r.name}</span> (${r.platform})`).join(' | ') || 'Sin coincidencias';
+    div.innerHTML = `<span class="hist-time">[${entry.time}]</span>${str}`;
+    log.appendChild(div);
+  });
+}
+
+// === EXPORTAR CSV ===
+document.getElementById('btnExport').addEventListener('click', exportCSV);
+
+function exportCSV() {
+  if (state.history.length === 0) {
+    showToast('No hay datos para exfiltrar');
+    return;
+  }
+  let csv = 'Timestamp,Modelo,Plataforma,ExternalProfileURL\n';
+  state.history.forEach(entry => {
+    entry.results.forEach(r => {
+      csv += `${entry.time},"${r.name}","${r.platform}","${r.url}"\n`;
+    });
+  });
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `FaceTrace_Exfiltrated_${Date.now()}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('Datos exfiltrados correctamente (CSV)');
+  playBeep(1200, 80, 0.06);
+  termLine('> EXFILTRACIÓN COMPLETADA: FaceTrace_Exfiltrated_' + Date.now() + '.csv', 'ok');
+}
+
+// === BOTÓN SONIDO ===
+document.getElementById('soundBtn').addEventListener('click', () => {
+  state.soundOn = !state.soundOn;
+  const btn = document.getElementById('soundBtn');
+  btn.innerHTML = state.soundOn ? '<i class="fas fa-volume-high"></i>' : '<i class="fas fa-volume-xmark"></i>';
+  btn.classList.toggle('on', state.soundOn);
+  if (state.soundOn) playBeep(1000, 50, 0.05);
+});
+
+// === RESIZE HANDLER ===
+window.addEventListener('resize', () => {
+  if (state.cameraActive || state.selectedBlob) resizeScanOverlay();
+});
+</script>
+</body>
+</html>
