@@ -15,7 +15,7 @@ const API_BASE = 'https://api.camgirlfinder.net';
 const USER_AGENT = 'FaceTrace_OSINT_Recon/1.0';
 
 // Ruta proxy para búsqueda por imagen (POST)
-app.post('/api/search', upload.single('image'), async (req, res) => {
+app.post('/search', upload.single('image'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No se envió ninguna imagen.' });
@@ -38,7 +38,7 @@ app.post('/api/search', upload.single('image'), async (req, res) => {
 });
 
 // Ruta proxy para búsqueda por URL o nombre (GET)
-app.get('/api/search', async (req, res) => {
+app.get('/search', async (req, res) => {
   try {
     const query = new URLSearchParams(req.query).toString();
     const endpoint = req.query.q ? `${API_BASE}/models/search?${query}` : `${API_BASE}/search?${query}`;
