@@ -37,23 +37,6 @@ app.post('/search', upload.single('image'), async (req, res) => {
   }
 });
 
-// Ruta proxy para búsqueda por URL o nombre (GET)
-app.get('/search', async (req, res) => {
-  try {
-    const query = new URLSearchParams(req.query).toString();
-    const endpoint = req.query.q ? `${API_BASE}/models/search?${query}` : `${API_BASE}/search?${query}`;
-    
-    const response = await fetch(endpoint, {
-      headers: { 'User-Agent': USER_AGENT }
-    });
-
-    const data = await response.json();
-    res.status(response.status).json(data);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // Puerto asignado dinámicamente por Render
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Proxy FaceTrace OSINT activo en puerto ${PORT}`));
